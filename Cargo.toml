@@ -1,0 +1,8 @@
+[package]
+name = "texthooker_websocket_proxy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bus = "2.4.0"
+tungstenite = "0.20.0"
