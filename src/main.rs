@@ -13,8 +13,10 @@ fn main() {
 
     let bind_addr = "127.0.0.1:6678";
     let downstream_addresses = [
-        // textractor-websocket, mpvacious
+        // textractor-websocket
         "ws://localhost:6677",
+        // mpv_websocket (configured)
+        "ws://localhost:6676",
         // agent
         "ws://localhost:9001",
     ];
