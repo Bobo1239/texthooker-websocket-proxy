@@ -4,5 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bus = "2.4.0"
-tungstenite = "0.20.0"
+anyhow = "1.0.75"
+env_logger = "0.10.0"
+futures-util = "0.3.28"
+log = "0.4.20"
+tokio = { version = "1.32.0", features = ["full"] }
+tokio-tungstenite = "0.20.0"

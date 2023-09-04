@@ -1,15 +1,19 @@
-use std::{
+use anyhow::Result;
+use futures_util::{FutureExt, SinkExt, StreamExt};
+use log::*;
+use tokio::{
     net::TcpListener,
-    sync::{Arc, Mutex},
-    thread::spawn,
-    time::Duration,
+    sync,
+    time::{self, Duration},
 };
+use tokio_tungstenite::tungstenite::Message;
 
-use bus::Bus;
-use tungstenite::Error;
-
-fn main() {
-    let bus = Arc::new(Mutex::new(Bus::new(10)));
+#[tokio::main]
+async fn main() -> Result<()> {
+    env_logger::init_from_env(
+        env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
+    );
+    let (tx, _) = sync::broadcast::channel(10);
 
     let bind_addr = "127.0.0.1:6678";
     let downstream_addresses = [
@@ -21,40 +25,64 @@ fn main() {
         "ws://localhost:9001",
     ];
 
-    let server = TcpListener::bind(bind_addr).unwrap();
-    println!("Listening on {bind_addr}");
+    let server = TcpListener::bind(bind_addr).await?;
+    info!("Listening on {bind_addr}");
 
     for addr in downstream_addresses {
-        let bus = Arc::clone(&bus);
-        spawn(move || loop {
-            if let Ok((mut socket, _)) = tungstenite::connect(addr) {
-                println!("Outgoing connection to {addr}");
-                loop {
-                    match socket.read() {
-                        Ok(msg) => {
-                            bus.lock().unwrap().broadcast(msg);
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Ok((socket, _)) = tokio_tungstenite::connect_async(addr).await {
+                    info!("Outgoing connection to {addr}");
+                    socket
+                        .for_each(|msg| async {
+                            if let Ok(msg) = msg {
+                                tx.send(msg).unwrap();
+                            }
+                        })
+                        .await;
+                    info!("Outgoing connection closed to {addr}");
+                }
+
+                time::sleep(Duration::from_secs(1)).await;
+            }
+        });
+    }
+
+    while let Ok((stream, peer_addr)) = server.accept().await {
+        let mut rx = tx.subscribe();
+        tokio::spawn(async move {
+            info!("Incoming connection from {peer_addr}");
+            let mut websocket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let mut keepalive_interval = time::interval(Duration::from_secs(30));
+            loop {
+                let msg = futures_util::select! {
+                    _ = keepalive_interval.tick().fuse() => {
+                        // Ensure that we don't let the WebSocket connection get timed out by
+                        // sending a periodic ping
+                        Some(Message::Ping(Vec::new()))
+                    }
+                    msg = rx.recv().fuse() => {
+                        Some(msg.unwrap())
+                    }
+                    msg = websocket.next() => {
+                        if msg.is_none() {
+                            // Socket was closed
+                            break;
                         }
-                        Err(Error::AlreadyClosed) => break,
-                        Err(_) => {}
+                        // We're also reading messages so pongs don't fill up our input queue
+                        None
+                    }
+                };
+                if let Some(msg) = msg {
+                    if let Err(e) = websocket.send(msg).await {
+                        error!("Send failed: {:?}", e);
                     }
                 }
-                println!("Outgoing connection closed to {addr}");
             }
-
-            std::thread::sleep(Duration::from_secs(1));
+            info!("Incoming connection closed from {peer_addr}");
         });
     }
 
-    for stream in server.incoming().flatten() {
-        let rx = bus.lock().unwrap().add_rx();
-        spawn(move || {
-            let peer_addr = stream.peer_addr().unwrap();
-            println!("Incoming connection from {peer_addr}");
-            let mut websocket = tungstenite::accept(stream).unwrap();
-            for msg in rx {
-                websocket.send(msg).unwrap();
-            }
-            println!("Incoming connection closed from {peer_addr}");
-        });
-    }
+    Ok(())
 }
