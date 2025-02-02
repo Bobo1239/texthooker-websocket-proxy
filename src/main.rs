@@ -6,7 +6,7 @@ use tokio::{
     sync,
     time::{self, Duration},
 };
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{Bytes, Message};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
                     _ = keepalive_interval.tick().fuse() => {
                         // Ensure that we don't let the WebSocket connection get timed out by
                         // sending a periodic ping
-                        Some(Message::Ping(Vec::new()))
+                        Some(Message::Ping(Bytes::new()))
                     }
                     msg = rx.recv().fuse() => {
                         Some(msg.unwrap())
