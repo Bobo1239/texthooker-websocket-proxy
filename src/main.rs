@@ -37,7 +37,8 @@ async fn main() -> Result<()> {
                     socket
                         .for_each(|msg| async {
                             if let Ok(msg) = msg {
-                                tx.send(msg).unwrap();
+                                // May fail if no there are subscribers which is fine.
+                                tx.send(msg).ok();
                             }
                         })
                         .await;
